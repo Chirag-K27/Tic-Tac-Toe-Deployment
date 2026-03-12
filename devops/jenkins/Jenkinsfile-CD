@@ -1,0 +1,163 @@
+// ──────────────────────────────────────────────
+// Jenkins CD Pipeline — Deploy to EKS
+// ──────────────────────────────────────────────
+
+pipeline {
+    agent any
+
+    parameters {
+        string(name: 'IMAGE_TAG', description: 'Docker image tag to deploy (passed from CI pipeline)')
+    }
+
+    environment {
+        AWS_REGION       = 'us-east-1'
+        AWS_ACCOUNT_ID   = credentials('aws-account-id')
+        ECR_REPO         = 'nodejs-app'
+        ECR_REGISTRY     = "${AWS_ACCOUNT_ID}.dkr.ecr.${AWS_REGION}.amazonaws.com"
+        FULL_IMAGE       = "${ECR_REGISTRY}/${ECR_REPO}:${params.IMAGE_TAG}"
+        EKS_CLUSTER_NAME = 'nodejs-eks'
+        K8S_NAMESPACE    = 'nodejs-app'
+    }
+
+    options {
+        timeout(time: 15, unit: 'MINUTES')
+        disableConcurrentBuilds()
+        buildDiscarder(logRotator(numToKeepStr: '10'))
+    }
+
+    stages {
+
+        // ─── Stage 1: Checkout K8s Manifests ───
+        stage('Checkout') {
+            steps {
+                echo '📥 Pulling Kubernetes manifests...'
+                checkout scm
+            }
+        }
+
+        // ─── Stage 2: Configure kubectl ───
+        stage('Configure kubectl') {
+            steps {
+                echo "☸️ Connecting to EKS cluster: ${EKS_CLUSTER_NAME}"
+                sh """
+                    aws eks update-kubeconfig \
+                      --region ${AWS_REGION} \
+                      --name ${EKS_CLUSTER_NAME}
+
+                    kubectl cluster-info
+                    kubectl get nodes
+                """
+            }
+        }
+
+        // ─── Stage 3: Create / Update Namespace ───
+        stage('Setup Namespace') {
+            steps {
+                echo "📁 Ensuring namespace '${K8S_NAMESPACE}' exists..."
+                sh """
+                    kubectl apply -f devops/kubernetes/namespace.yaml
+                """
+            }
+        }
+
+        // ─── Stage 4: Deploy to EKS ───
+        stage('Deploy') {
+            steps {
+                echo "🚀 Deploying image: ${FULL_IMAGE}"
+                sh """
+                    # Substitute placeholders in deployment manifest
+                    sed -i 's|<AWS_ACCOUNT_ID>|${AWS_ACCOUNT_ID}|g' devops/kubernetes/deployment.yaml
+                    sed -i 's|<REGION>|${AWS_REGION}|g' devops/kubernetes/deployment.yaml
+                    sed -i 's|IMAGE_TAG|${params.IMAGE_TAG}|g' devops/kubernetes/deployment.yaml
+
+                    # Apply deployment and service
+                    kubectl apply -f devops/kubernetes/deployment.yaml
+                    kubectl apply -f devops/kubernetes/service.yaml
+                """
+            }
+        }
+
+        // ─── Stage 5: Verify Rolling Update ───
+        stage('Verify Rollout') {
+            steps {
+                echo '⏳ Waiting for rolling update to complete...'
+                sh """
+                    kubectl rollout status deployment/nodejs-app \
+                      -n ${K8S_NAMESPACE} \
+                      --timeout=300s
+                """
+            }
+        }
+
+        // ─── Stage 6: Post-Deploy Verification ───
+        stage('Health Check') {
+            steps {
+                echo '🩺 Verifying deployment health...'
+                sh """
+                    echo "--- Pods ---"
+                    kubectl get pods -n ${K8S_NAMESPACE} -o wide
+
+                    echo ""
+                    echo "--- Service ---"
+                    kubectl get svc -n ${K8S_NAMESPACE}
+
+                    echo ""
+                    echo "--- Deployment ---"
+                    kubectl describe deployment/nodejs-app -n ${K8S_NAMESPACE} | head -40
+
+                    echo ""
+                    echo "--- Load Balancer URL ---"
+                    kubectl get svc nodejs-app-service -n ${K8S_NAMESPACE} \
+                      -o jsonpath='{.status.loadBalancer.ingress[0].hostname}' && echo ""
+                """
+            }
+        }
+
+        // ─── Stage 7: Deploy Monitoring (Prometheus + Grafana) ───
+        stage('Deploy Monitoring') {
+            steps {
+                echo '📊 Deploying Prometheus + Grafana monitoring stack...'
+                sh """
+                    # Apply all monitoring manifests at once
+                    kubectl apply -f devops/kubernetes/monitoring/
+
+                    # Wait for Prometheus to be ready
+                    kubectl rollout status deployment/prometheus \
+                      -n monitoring --timeout=120s
+
+                    # Wait for Grafana to be ready
+                    kubectl rollout status deployment/grafana \
+                      -n monitoring --timeout=120s
+
+                    echo ""
+                    echo "--- Monitoring Pods ---"
+                    kubectl get pods -n monitoring
+
+                    echo ""
+                    echo "--- Grafana URL ---"
+                    kubectl get svc grafana-service -n monitoring \
+                      -o jsonpath='{.status.loadBalancer.ingress[0].hostname}' && echo ""
+                """
+            }
+        }
+    }
+
+    post {
+        success {
+            echo "✅ CD Pipeline complete! App deployed with image tag: ${params.IMAGE_TAG}"
+            sh """
+                echo "Application URL:"
+                kubectl get svc nodejs-app-service -n ${K8S_NAMESPACE} \
+                  -o jsonpath='http://{.status.loadBalancer.ingress[0].hostname}' && echo ""
+            """
+        }
+        failure {
+            echo '❌ CD Pipeline failed! Initiating rollback...'
+            sh """
+                kubectl rollout undo deployment/nodejs-app -n ${K8S_NAMESPACE} || true
+                echo "Rolled back to previous version."
+                kubectl get pods -n ${K8S_NAMESPACE}
+            """
+        }
+    }
+}

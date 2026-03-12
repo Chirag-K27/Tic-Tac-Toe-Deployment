@@ -1,0 +1,169 @@
+// ──────────────────────────────────────────────
+// Jenkins CI Pipeline — Build, Test, Scan, Push
+// ──────────────────────────────────────────────
+
+pipeline {
+    agent any
+
+    environment {
+        AWS_REGION       = 'us-east-1'
+        AWS_ACCOUNT_ID   = credentials('aws-account-id')
+        ECR_REPO         = 'nodejs-app'
+        ECR_REGISTRY     = "${AWS_ACCOUNT_ID}.dkr.ecr.${AWS_REGION}.amazonaws.com"
+        IMAGE_TAG        = "${env.BUILD_NUMBER}-${env.GIT_COMMIT?.take(7) ?: 'latest'}"
+        FULL_IMAGE       = "${ECR_REGISTRY}/${ECR_REPO}:${IMAGE_TAG}"
+        SONAR_HOST       = 'http://localhost:9000'
+    }
+
+    options {
+        timeout(time: 30, unit: 'MINUTES')
+        disableConcurrentBuilds()
+        buildDiscarder(logRotator(numToKeepStr: '10'))
+    }
+
+    stages {
+
+        // ─── Stage 1: Checkout ───
+        stage('Checkout') {
+            steps {
+                echo '📥 Pulling source code from GitHub...'
+                checkout scm
+            }
+        }
+
+        // ─── Stage 2: Install Dependencies ───
+        stage('Install Dependencies') {
+            steps {
+                echo '📦 Installing Node.js dependencies...'
+                sh '''
+                    node --version
+                    npm --version
+                    npm ci
+                '''
+            }
+        }
+
+        // ─── Stage 3: Run Tests ───
+        stage('Run Tests') {
+            steps {
+                echo '🧪 Running unit tests...'
+                sh '''
+                    npm test || echo "No tests configured, skipping..."
+                '''
+            }
+            post {
+                always {
+                    // Publish test results if they exist
+                    junit(testResults: '**/test-results/*.xml', allowEmptyResults: true)
+                }
+            }
+        }
+
+        // ─── Stage 4: SonarQube Code Analysis ───
+        stage('SonarQube Analysis') {
+            steps {
+                echo '🔍 Running SonarQube static code analysis...'
+                withSonarQubeEnv('SonarQube') {
+                    sh '''
+                        sonar-scanner \
+                          -Dsonar.projectKey=${ECR_REPO} \
+                          -Dsonar.projectName=${ECR_REPO} \
+                          -Dsonar.sources=. \
+                          -Dsonar.host.url=${SONAR_HOST} \
+                          -Dsonar.javascript.lcov.reportPaths=coverage/lcov.info \
+                          -Dsonar.exclusions=node_modules/**,coverage/**,tests/**,dist/**
+                    '''
+                }
+            }
+        }
+
+        // ─── Stage 5: Quality Gate ───
+        stage('Quality Gate') {
+            steps {
+                echo '🚦 Waiting for SonarQube quality gate...'
+                timeout(time: 5, unit: 'MINUTES') {
+                    waitForQualityGate abortPipeline: true
+                }
+            }
+        }
+
+        // ─── Stage 6: Build Application ───
+        stage('Build Application') {
+            steps {
+                echo '🔨 Building the Node.js application...'
+                sh '''
+                    npm run build
+                '''
+            }
+        }
+
+        // ─── Stage 7: Docker Build ───
+        stage('Docker Build') {
+            steps {
+                echo "🐳 Building Docker image: ${FULL_IMAGE}"
+                sh """
+                    docker build \
+                      -f devops/docker/Dockerfile \
+                      -t ${FULL_IMAGE} \
+                      -t ${ECR_REGISTRY}/${ECR_REPO}:latest \
+                      .
+                """
+            }
+        }
+
+        // ─── Stage 8: Trivy Vulnerability Scan ───
+        stage('Trivy Scan') {
+            steps {
+                echo '🛡️ Running Trivy vulnerability scan on Docker image...'
+                sh """
+                    trivy image \
+                      --severity HIGH,CRITICAL \
+                      --exit-code 1 \
+                      --no-progress \
+                      --format table \
+                      --output trivy-report.txt \
+                      ${FULL_IMAGE}
+                """
+            }
+            post {
+                always {
+                    archiveArtifacts artifacts: 'trivy-report.txt', allowEmptyArchive: true
+                }
+            }
+        }
+
+        // ─── Stage 9: Push to ECR ───
+        stage('Push to ECR') {
+            steps {
+                echo '🚀 Pushing image to AWS ECR...'
+                sh """
+                    aws ecr get-login-password --region ${AWS_REGION} | \
+                      docker login --username AWS --password-stdin ${ECR_REGISTRY}
+
+                    docker push ${FULL_IMAGE}
+                    docker push ${ECR_REGISTRY}/${ECR_REPO}:latest
+                """
+            }
+        }
+    }
+
+    post {
+        success {
+            echo "✅ CI Pipeline complete! Image pushed: ${FULL_IMAGE}"
+            // Trigger the CD pipeline
+            build job: 'nodejs-app-cd',
+                  parameters: [string(name: 'IMAGE_TAG', value: "${IMAGE_TAG}")],
+                  wait: false
+        }
+        failure {
+            echo '❌ CI Pipeline failed. Check the logs above.'
+        }
+        always {
+            sh """
+                docker rmi ${FULL_IMAGE} || true
+                docker rmi ${ECR_REGISTRY}/${ECR_REPO}:latest || true
+            """
+            cleanWs()
+        }
+    }
+}

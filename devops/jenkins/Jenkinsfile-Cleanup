@@ -1,0 +1,126 @@
+// ──────────────────────────────────────────────
+// Jenkins Cleanup Pipeline — Tear Down Everything
+// ──────────────────────────────────────────────
+// Run MANUALLY only when you want to destroy all resources.
+
+pipeline {
+    agent any
+
+    environment {
+        AWS_REGION       = 'us-east-1'
+        AWS_ACCOUNT_ID   = credentials('aws-account-id')
+        ECR_REPO         = 'nodejs-app'
+        ECR_REGISTRY     = "${AWS_ACCOUNT_ID}.dkr.ecr.${AWS_REGION}.amazonaws.com"
+        EKS_CLUSTER_NAME = 'nodejs-eks'
+    }
+
+    options {
+        timeout(time: 30, unit: 'MINUTES')
+    }
+
+    stages {
+
+        // ─── Stage 1: Checkout ───
+        stage('Checkout') {
+            steps {
+                echo '📥 Pulling manifests...'
+                checkout scm
+            }
+        }
+
+        // ─── Stage 2: Connect to EKS ───
+        stage('Configure kubectl') {
+            steps {
+                echo '☸️ Connecting to EKS...'
+                sh """
+                    aws eks update-kubeconfig \
+                      --region ${AWS_REGION} \
+                      --name ${EKS_CLUSTER_NAME}
+                """
+            }
+        }
+
+        // ─── Stage 3: Delete Monitoring Stack ───
+        stage('Delete Monitoring') {
+            steps {
+                echo '📊 Removing Prometheus + Grafana...'
+                sh """
+                    kubectl delete -f devops/kubernetes/monitoring/ --ignore-not-found=true
+                    echo "Waiting for monitoring pods to terminate..."
+                    kubectl wait --for=delete pod --all -n monitoring --timeout=120s || true
+                """
+            }
+        }
+
+        // ─── Stage 4: Delete Application ───
+        stage('Delete Application') {
+            steps {
+                echo '🗑️ Removing Node.js app from EKS...'
+                sh """
+                    kubectl delete -f devops/kubernetes/service.yaml --ignore-not-found=true
+                    kubectl delete -f devops/kubernetes/deployment.yaml --ignore-not-found=true
+                    kubectl delete -f devops/kubernetes/namespace.yaml --ignore-not-found=true
+                    echo "Waiting for app pods to terminate..."
+                    kubectl wait --for=delete pod --all -n nodejs-app --timeout=120s || true
+                """
+            }
+        }
+
+        // ─── Stage 5: Clean ECR Images ───
+        stage('Clean ECR Images') {
+            steps {
+                echo '🧹 Deleting all Docker images from ECR...'
+                sh """
+                    # List all image digests and delete them
+                    IMAGES=\$(aws ecr list-images \
+                      --repository-name ${ECR_REPO} \
+                      --region ${AWS_REGION} \
+                      --query 'imageIds[*]' \
+                      --output json 2>/dev/null)
+
+                    if [ "\$IMAGES" != "[]" ] && [ -n "\$IMAGES" ]; then
+                        aws ecr batch-delete-image \
+                          --repository-name ${ECR_REPO} \
+                          --region ${AWS_REGION} \
+                          --image-ids "\$IMAGES"
+                        echo "All ECR images deleted."
+                    else
+                        echo "No images found in ECR."
+                    fi
+                """
+            }
+        }
+
+        // ─── Stage 6: Clean Local Docker ───
+        stage('Clean Local Docker') {
+            steps {
+                echo '🐳 Cleaning local Docker images...'
+                sh """
+                    docker system prune -af || true
+                    echo "Local Docker cleaned."
+                """
+            }
+        }
+    }
+
+    post {
+        success {
+            echo '''
+            ✅ ═══════════════════════════════════════════
+               CLEANUP COMPLETE!
+               All K8s resources and ECR images removed.
+               
+               ⚠️  NEXT STEP (Run from YOUR laptop):
+               cd devops/terraform
+               terraform destroy
+               
+               This will delete EC2, EKS, VPC, and all
+               AWS resources to stop billing.
+            ═══════════════════════════════════════════
+            '''
+        }
+        failure {
+            echo '❌ Cleanup had some errors. Check logs above and clean up manually if needed.'
+        }
+    }
+}

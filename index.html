@@ -1,0 +1,120 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="description"
+        content="A beautifully designed Tic Tac Toe game with stunning visuals and smooth animations." />
+    <title>Tic Tac Toe — Play Now</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;500;600;700;800&display=swap"
+        rel="stylesheet" />
+    <link rel="stylesheet" href="style.css" />
+</head>
+
+<body>
+    <!-- Animated background orbs -->
+    <div class="bg-orbs">
+        <div class="orb orb-1"></div>
+        <div class="orb orb-2"></div>
+        <div class="orb orb-3"></div>
+    </div>
+
+    <div class="game-container">
+        <!-- Header -->
+        <header class="header">
+            <div class="game-switch">
+                <a href="snake.html" class="switch-link">
+                    <span class="switch-icon">🐍</span> Play Snake
+                </a>
+            </div>
+            <h1 class="title">
+                <span class="title-icon">✦</span>
+                Tic Tac Toe
+            </h1>
+            <p class="subtitle">Challenge a friend or play against AI</p>
+        </header>
+
+        <!-- Mode Selection -->
+        <div class="mode-selector" id="modeSelector">
+            <button class="mode-btn active" id="btnPvP" data-mode="pvp">
+                <span class="mode-icon">👥</span>
+                <span class="mode-label">Player vs Player</span>
+            </button>
+            <button class="mode-btn" id="btnPvAI" data-mode="pvai">
+                <span class="mode-icon">🤖</span>
+                <span class="mode-label">Player vs AI</span>
+            </button>
+        </div>
+
+        <!-- Scoreboard -->
+        <div class="scoreboard">
+            <div class="score-card score-x">
+                <span class="score-symbol">✕</span>
+                <span class="score-name" id="nameX">Player 1</span>
+                <span class="score-value" id="scoreX">0</span>
+            </div>
+            <div class="score-card score-draw">
+                <span class="score-symbol">=</span>
+                <span class="score-name">Draw</span>
+                <span class="score-value" id="scoreDraw">0</span>
+            </div>
+            <div class="score-card score-o">
+                <span class="score-symbol">◯</span>
+                <span class="score-name" id="nameO">Player 2</span>
+                <span class="score-value" id="scoreO">0</span>
+            </div>
+        </div>
+
+        <!-- Turn Indicator -->
+        <div class="turn-indicator" id="turnIndicator">
+            <span class="turn-symbol" id="turnSymbol">✕</span>
+            <span class="turn-text" id="turnText">'s turn</span>
+        </div>
+
+        <!-- Game Board -->
+        <div class="board-wrapper">
+            <div class="board" id="board">
+                <div class="cell" data-index="0"></div>
+                <div class="cell" data-index="1"></div>
+                <div class="cell" data-index="2"></div>
+                <div class="cell" data-index="3"></div>
+                <div class="cell" data-index="4"></div>
+                <div class="cell" data-index="5"></div>
+                <div class="cell" data-index="6"></div>
+                <div class="cell" data-index="7"></div>
+                <div class="cell" data-index="8"></div>
+            </div>
+            <!-- Win line overlay -->
+            <svg class="win-line-svg" id="winLineSvg" viewBox="0 0 100 100" preserveAspectRatio="none">
+                <line id="winLine" x1="0" y1="0" x2="0" y2="0" />
+            </svg>
+        </div>
+
+        <!-- Result Overlay -->
+        <div class="result-overlay hidden" id="resultOverlay">
+            <div class="result-card">
+                <div class="result-emoji" id="resultEmoji">🎉</div>
+                <h2 class="result-title" id="resultTitle">Player 1 Wins!</h2>
+                <p class="result-sub" id="resultSub">Excellent play!</p>
+                <button class="btn-play-again" id="btnPlayAgain">Play Again</button>
+            </div>
+        </div>
+
+        <!-- Restart Button -->
+        <button class="btn-restart" id="btnRestart">
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"
+                stroke-linecap="round" stroke-linejoin="round">
+                <polyline points="23 4 23 10 17 10"></polyline>
+                <path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10"></path>
+            </svg>
+            New Game
+        </button>
+    </div>
+
+    <script src="game.js"></script>
+</body>
+
+</html>

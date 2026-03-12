@@ -1,0 +1,10 @@
+# ──────────────────────────────────────────────
+# Namespace
+# ──────────────────────────────────────────────
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: nodejs-app
+  labels:
+    app: nodejs-app
+    environment: production
