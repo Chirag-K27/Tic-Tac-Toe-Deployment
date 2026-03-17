@@ -9,11 +9,11 @@ WORKDIR /app
 
 # Install dependencies first (layer caching)
 COPY package*.json ./
-RUN npm ci --only=production && \
+RUN npm install --only=production && \
     cp -R node_modules /tmp/node_modules
 
 # Install all deps for build
-RUN npm ci
+RUN npm install
 COPY . .
 RUN npm run build --if-present
 
@@ -43,7 +43,7 @@ EXPOSE 3000
 
 # Health check
 HEALTHCHECK --interval=30s --timeout=3s --start-period=10s --retries=3 \
-  CMD wget --no-verbose --tries=1 --spider http://localhost:3000/health || exit 1
+  CMD curl -f http://localhost:3000/health || exit 1
 
 # Start application
 CMD ["node", "server.js"]
