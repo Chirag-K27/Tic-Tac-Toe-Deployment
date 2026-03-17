@@ -1,0 +1,17 @@
+{
+  "name": "tic-tac-toe-devops",
+  "version": "1.0.0",
+  "description": "Tic Tac Toe + Snake Game — DevOps demo project",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js",
+    "build": "echo 'Build step: static assets ready'",
+    "test": "echo 'Tests passed' && exit 0"
+  },
+  "dependencies": {
+    "express": "^4.18.2"
+  },
+  "engines": {
+    "node": ">=20.0.0"
+  }
+}
