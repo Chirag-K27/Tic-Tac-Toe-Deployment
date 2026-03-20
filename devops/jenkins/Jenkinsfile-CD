@@ -118,7 +118,11 @@ pipeline {
             steps {
                 echo '📊 Deploying Prometheus + Grafana monitoring stack...'
                 sh """
-                    # Apply all monitoring manifests at once
+                    # Create monitoring namespace first (renamed to 00- so it's always first alphabetically)
+                    kubectl apply -f devops/kubernetes/monitoring/00-namespace.yaml
+                    sleep 3
+
+                    # Apply all monitoring manifests (namespace already exists)
                     kubectl apply -f devops/kubernetes/monitoring/
 
                     # Wait for Prometheus to be ready

@@ -15,6 +15,12 @@ resource "aws_eks_cluster" "main" {
     endpoint_public_access  = true
   }
 
+  # Enable API-based authentication (required for EKS Access Entries)
+  access_config {
+    authentication_mode                         = "API_AND_CONFIG_MAP"
+    bootstrap_cluster_creator_admin_permissions = true
+  }
+
   # Enable logging
   enabled_cluster_log_types = [
     "api",
